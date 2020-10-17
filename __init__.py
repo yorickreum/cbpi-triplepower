@@ -1,80 +1,145 @@
 # -*- coding: utf-8 -*-
+import fnmatch
+import os
 
 from modules import cbpi
 from modules.core.controller import KettleController
 from modules.core.hardware import ActorBase
 from modules.core.props import Property
 
-try:
-    import RPi.GPIO as GPIO
+GPIO_PATH = '/sys/class/gpio'
+GPIO_MAX = 200
+GPIO_MIN = 0
+GPIO_HIGH = '1'
+GPIO_LOW = '0'
+GPIO_IN = 'in'
+GPIO_OUT = 'out'
 
-    GPIO.setmode(GPIO.BCM)
-except Exception as e:
-    print(e)
-    pass
+
+class NotificationAPI(object):
+    def notify(self, headline, message, type="success", timeout=5000):
+        self.api.notify(headline, message, type, timeout)
+
+
+def listGPIO():
+    # Lists any GPIO in found in /sys/class/gpio
+    try:
+        arr = []
+        for dirname in os.listdir(GPIO_PATH):
+            if fnmatch.fnmatch(dirname, 'gpio[0123456789]*'):
+                arr.append(dirname[4:])
+        if not arr:
+            print('No active GPIO found - using default range!')
+            arr = list(range(GPIO_MIN, GPIO_MAX))
+        return arr
+    except:
+        print('Error listing GPIO!')
+        return []
+
+
+def setupGPIO(device, value):
+    # Sets up GPIO if not defined on system boot (i.e. /etc/rc.local)
+    # echo  <gpio#> > /sys/class/gpio/export
+    # echo <in/out> > /sys/class/gpio/gpio<#>/direction
+    try:
+        if not os.path.exists(GPIO_PATH + ('/gpio%d' % device)):
+            with open(GPIO_PATH + '/export', 'w') as fp:
+                fp.write(str(device))
+            with open(GPIO_PATH + ('/gpio%d/direction' % device), 'w') as fp:
+                fp.write('out')
+    except:
+        print(('Error setting up GPIO%d!' % device))
+
+
+def outputGPIO(device, value):
+    # Outputs new GPIO value
+    # echo <1/0> > /sys/class/gpio/gpio<#>/value
+    try:
+        with open(GPIO_PATH + ('/gpio%d/value' % device), 'w') as fp:
+            fp.write(value)
+    except:
+        print(('Error writing to GPIO%d!' % device))
 
 
 @cbpi.actor
 class TriplePower(ActorBase):
-    gpio1 = Property.Select(
-        "GPIO 1",
-        options=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
-        description="GPIO to which the actor's heater #1 is connected"
-    )
-    gpio2 = Property.Select(
-        "GPIO 2",
-        options=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
-        description="GPIO to which the actor's heater #2 is connected"
-    )
-    gpio3 = Property.Select(
-        "GPIO 3",
-        options=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
-        description="GPIO to which the actor's heater #3 is connected"
-    )
+    active = Property.Select("Active", options=["High", "Low"],
+                             description="Selects if the GPIO is Active High (On = 1, Off = 0) or Low (On = 0, Off = 1)")
+    gpio1 = Property.Select("GPIO 1", listGPIO(),
+                            description="GPIO to which the actor's heater #1 is connected"
+                            )
+    gpio2 = Property.Select("GPIO 2", listGPIO(),
+                            description="GPIO to which the actor's heater #2 is connected"
+                            )
+    gpio3 = Property.Select("GPIO 3", listGPIO(),
+                            description="GPIO to which the actor's heater #3 is connected"
+                            )
 
     def init(self):
-        GPIO.setup(int(self.gpio1), GPIO.OUT)
-        GPIO.setup(int(self.gpio2), GPIO.OUT)
-        GPIO.setup(int(self.gpio3), GPIO.OUT)
-        self.off()
+        setupGPIO(int(self.gpio1), GPIO_OUT)
+        setupGPIO(int(self.gpio2), GPIO_OUT)
+        setupGPIO(int(self.gpio3), GPIO_OUT)
+        self.switch_gpio(self.gpio1, False)
+        self.switch_gpio(self.gpio2, False)
+        self.switch_gpio(self.gpio3, False)
 
-    def on(self, power=0):
-        if power == 0:
-            self.off()
-        elif power == 1:
-            GPIO.output(int(self.gpio1), 1)
-            GPIO.output(int(self.gpio2), 0)
-            GPIO.output(int(self.gpio3), 0)
-        elif power == 2:
-            GPIO.output(int(self.gpio1), 1)
-            GPIO.output(int(self.gpio2), 1)
-            GPIO.output(int(self.gpio3), 0)
-        elif power == 3:
-            GPIO.output(int(self.gpio1), 1)
-            GPIO.output(int(self.gpio2), 1)
-            GPIO.output(int(self.gpio3), 1)
+    def on(self, power=100):
+        cbpi.app.logger.info("TriplePower on got power: %s" % str(power))
+        self.set_power(power)
+        # else:
+        #     raise ValueError("Power was none of 0, 33, 66, 99 or 100! Switching all heaters off...")
+
+    def set_power(self, power):
+        cbpi.app.logger.info("TriplePower set power got power: %s" % str(power))
+        if power is 0:
+            self.switch_gpio(self.gpio1, False)
+            self.switch_gpio(self.gpio2, False)
+            self.switch_gpio(self.gpio3, False)
+        elif power == 33:
+            self.switch_gpio(self.gpio1, True)
+            self.switch_gpio(self.gpio2, False)
+            self.switch_gpio(self.gpio3, False)
+        elif power == 66:
+            self.switch_gpio(self.gpio1, True)
+            self.switch_gpio(self.gpio2, True)
+            self.switch_gpio(self.gpio3, False)
+        elif power is None or power == 99 or power == 100:
+            self.switch_gpio(self.gpio1, True)
+            self.switch_gpio(self.gpio2, True)
+            self.switch_gpio(self.gpio3, True)
+
+    def switch_gpio(self, gpio, switchOn=False):
+        if switchOn:
+            if self.active == "High":
+                outputGPIO(int(gpio), GPIO_HIGH)
+            else:  # self.active == "Low"
+                outputGPIO(int(gpio), GPIO_LOW)
         else:
-            self.off()
-            raise ValueError("Power was none of 0, 1, 2 or 3! Switching all heaters off...")
+            if self.active == "High":
+                outputGPIO(int(gpio), GPIO_LOW)
+            else:  # self.active == "Low"
+                outputGPIO(int(gpio), GPIO_HIGH)
 
     def off(self):
-        GPIO.output(int(self.gpio1), 0)
-        GPIO.output(int(self.gpio2), 0)
-        GPIO.output(int(self.gpio3), 0)
+        self.set_power(0)
 
 
 @cbpi.controller
 class TripleHysteresis(KettleController):
     # Custom Properties
 
-    on1 = Property.Number("Offset Level #1 On", True, 0,
-                          description="Offset below target temp when heater should switch on #1 (one heater). Should be bigger than Offset Off.")
-    on2 = Property.Number("Offset Level #2 On", True, 0,
-                          description="Offset below target temp when heater should switched on level #2 (two heaters). Should be bigger than Offsets Off and level #1.")
-    on3 = Property.Number("Offset Level #3 On", True, 0,
-                          description="Offset below target temp when heater should switched on level #3 (three heaters). Should be bigger than Offset Off and level #2.")
-    off = Property.Number("Offset Off", True, 0,
-                          description="Offset below target temp when heater should switched off. Should be the smallest value.")
+    phase_1_on = Property.Number("Offset Phase #1 On", True, 0,
+                                 description="Offset below target temp when heater should switch on phase one.")
+    phase_1_off = Property.Number("Offset Phase #1 Off", True, 0,
+                                  description="Offset below target temp when heater should switch off phase one.")
+    phase_2_on = Property.Number("Offset Phase #2 On", True, 0,
+                                 description="Offset below target temp when heater should switch on phase two.")
+    phase_2_off = Property.Number("Offset Phase #2 Off", True, 0,
+                                  description="Offset below target temp when heater should switch off phase two.")
+    phase_3_on = Property.Number("Offset Phase #3 On", True, 0,
+                                 description="Offset below target temp when heater should switch on phase three.")
+    phase_3_off = Property.Number("Offset Phase #3 Off", True, 0,
+                                  description="Offset below target temp when heater should switch off phase three.")
 
     def stop(self):
         '''
@@ -91,12 +156,19 @@ class TripleHysteresis(KettleController):
         :return:
         """
         while self.is_running():
-            if self.get_temp() < self.get_target_temp() - float(self.on1):
-                self.heater_on(1)
-            if self.get_temp() < self.get_target_temp() - float(self.on2):
-                self.heater_on(2)
-            if self.get_temp() < self.get_target_temp() - float(self.on3):
-                self.heater_on(3)
-            elif self.get_temp() >= self.get_target_temp() - float(self.off):
+            offset = (self.get_target_temp() - self.get_temp())
+
+            should_phase1_be_on = (offset > float(self.phase_1_on)) and not (offset < float(self.phase_1_off))
+            should_phase2_be_on = (offset > float(self.phase_2_on)) and not (offset < float(self.phase_2_off))
+            should_phase3_be_on = (offset > float(self.phase_3_on)) and not (offset < float(self.phase_3_off))
+
+            num_of_phases = int(should_phase1_be_on) + int(should_phase2_be_on) + int(should_phase3_be_on)
+            if num_of_phases == 3:
+                self.heater_on(100)
+            elif num_of_phases == 2:
+                self.heater_on(66)
+            elif num_of_phases == 1:
+                self.heater_on(33)
+            else:
                 self.heater_off()
             self.sleep(1)
