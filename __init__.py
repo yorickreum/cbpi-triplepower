@@ -136,17 +136,16 @@ class TriplePower(ActorBase):
     def switch_gpios(self, power):
         if power is None:
             power = self.power
-        else:
-            power = closest_power(power)
+        power = closest_power(power)
         active_gpios = self.power_phases[power]
         app.logger.info("TriplePower switches on %s phases..." % (str(len(active_gpios))))
         for gpio in self.gpios:
             self.switch_gpio(gpio, (gpio in active_gpios))
-        self.api.notify("TriplePower",
-                        "Heater's power switched on %s phases." % (str(len(active_gpios))),
-                        type="success",  # maybe use success?
-                        timeout=7500
-                        )
+        # self.api.notify("TriplePower",
+        #                 "Heater's power switched on %s phases." % (str(len(active_gpios))),
+        #                 type="success",  # maybe use success?
+        #                 timeout=7500
+        #                 )
 
     def off(self):
         app.logger.info("TriplePower switches off all three phases...")
