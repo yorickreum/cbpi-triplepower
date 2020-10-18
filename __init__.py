@@ -80,6 +80,7 @@ class TriplePower(ActorBase):
 
     gpios = None
     power_phases = None
+    state = 0
     power = 100  # 0, 33, 67, 100
 
     def init(self):
@@ -98,6 +99,7 @@ class TriplePower(ActorBase):
         app.logger.info(
             "TriplePower on called with power %s and self.power set to %s." % (str(power), str(self.power))
         )
+        self.state = 1
         self.switch_gpios(power)
 
     def set_power(self, power):
@@ -146,6 +148,7 @@ class TriplePower(ActorBase):
         self.switch_gpio(self.gpio1, False)
         self.switch_gpio(self.gpio2, False)
         self.switch_gpio(self.gpio3, False)
+        self.state = 0
         self.api.notify("TriplePower",
                         "Heater switched off all three phases.",
                         type="warning",
@@ -202,8 +205,8 @@ class TripleHysteresis(KettleController):
                 self.heater_set_power(100)
                 self.heater_on(100)
             elif num_of_phases == 2:
-                self.heater_set_power(66)
-                self.heater_on(66)
+                self.heater_set_power(67)
+                self.heater_on(67)
             elif num_of_phases == 1:
                 self.heater_set_power(33)
                 self.heater_on(33)
